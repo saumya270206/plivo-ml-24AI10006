@@ -38,5 +38,6 @@ Training could be run only for below steps due to time constraint (target: 2000 
 | 1300 | 2.1416 |
 | 1400 | 2.1564 |
 | 1500 | 2.1248 |
+| 1600 | 2.0810 |
 
 Training is continuing toward 2000 steps. Final evaluation (Dev BPB) had to be recorded after training completes, but it took around 47-50 mins due to which I couldn't report it.
