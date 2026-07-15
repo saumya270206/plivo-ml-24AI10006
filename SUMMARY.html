@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Project Summary</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa1ac;
+    --accent: #7dd3fc;
+    --accent2: #86efac;
+    --warn: #fca5a5;
+    --todo-bg: #3a2e1a;
+    --todo-border: #a8763e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 1.9rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 40px; }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 48px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.05rem; color: var(--accent); margin-top: 28px; }
+  p { color: var(--text); }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+  th { color: var(--muted); font-weight: 600; }
+  code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    background: #0b0d11;
+    border-radius: 6px;
+  }
+  code { padding: 2px 6px; }
+  pre { padding: 14px; overflow-x: auto; border: 1px solid var(--border); }
+  .todo {
+    background: var(--todo-bg);
+    border: 1px solid var(--todo-border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    color: #f0d9b5;
+    margin: 10px 0;
+  }
+  .todo strong { color: var(--warn); }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    margin-right: 6px;
+  }
+  .badge-ai { background: #1e3a5f; color: var(--accent); }
+  .badge-human { background: #1f3d2a; color: var(--accent2); }
+  .badge-both { background: #3a2f1e; color: #f0c674; }
+  ul { padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  .footer-note { color: var(--muted); font-size: 0.85rem; margin-top: 56px; border-top: 1px solid var(--border); padding-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Project Summary</h1>
+  <p class="subtitle">Small GPT trained under a 2,000,000-parameter / 2,000-step budget on a bilingual (English + Devanagari) corpus.</p>
+
+
+  <h2>1. Architecture</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Component</th><th>Choice</th><th>Why</th></tr>
+      <tr><td>Tokenizer</td><td>Byte-level BPE, vocab_size=768</td><td>Fixes the byte/character imbalance between English (1 byte/char) and Devanagari (3 bytes/char) under a fixed byte-level block_size; lossless by construction since it only merges byte spans.</td></tr>
+      <tr><td>Positional encoding</td><td>RoPE (rotary), replacing learned <code>pos_emb</code></td><td>Zero learned parameters vs. ~20K for a learned absolute table; encodes relative offsets, which should generalize at least as well.</td></tr>
+      <tr><td>Layers / heads / dim</td><td>n_layer=6, n_head=4, n_embd=160</td><td>Depth increased from a 4-layer baseline, funded by weight tying + RoPE's freed parameters.</td></tr>
+      <tr><td>Embeddings</td><td>Tied (<code>head.weight = tok_emb.weight</code>)</td><td>Saves vocab_size × n_embd params entirely (Press &amp; Wolf, 2017); reinvested into depth.</td></tr>
+      <tr><td>Init</td><td>GPT-2 style: std=0.02, residual projections scaled by 1/sqrt(2·n_layer)</td><td>Prevents residual-stream variance from compounding across 6 stacked blocks.</td></tr>
+      <tr><td>MLP</td><td>GELU, 4x expansion</td><td>Standard; not changed from baseline.</td></tr>
+      <tr><td>Optimizer</td><td>AdamW, weight decay on 2D+ params only</td><td>Decaying biases/LayerNorm/embeddings fights normalization for no benefit.</td></tr>
+      <tr><td>LR schedule</td><td>Linear warmup (100 steps) → cosine decay to 10% peak LR</td><td>Avoids early-step instability, then anneals smoothly.</td></tr>
+      <tr><td>Grad clipping</td><td>Max norm 1.0</td><td>Guards against spikes, especially important early in training.</td></tr>
+      <tr><td>Batch size</td><td>64 (up from 8)</td><td><strong>Uncapped</strong> by the assignment — only <code>steps</code> and <code>n_params</code> are capped — so this is a free ~8x increase in total tokens seen over the same 2000 steps.</td></tr>
+      <tr><td>Params</td><td>1,978,880 / 2,000,000 cap</td><td>21,120 headroom remaining under the cap.</td></tr>
+    </table>
+  </div>
+
+  <h3>Why this combination, not something else</h3>
+  <p>
+    The three fixed budgets in this assignment are steps, parameters, and the corpus itself — so the highest-leverage
+    changes are the ones that spend those budgets more efficiently rather than adding raw capacity. Batch size is the
+    clearest example: it doesn't count against any cap, so raising it is close to a free win in both total tokens seen
+    and gradient variance. RoPE is the second: it replaces a parameter-hungry, non-extrapolating positional scheme with
+    a zero-parameter one, which either helps directly or at minimum frees capacity for the transformer body. Weight
+    tying, GPT-2 init, and the AdamW/schedule/clipping combination were carried over from an earlier iteration that
+    already validated at bpb 2.2492 before RoPE was introduced.
+  </p>
+
+  <h2>2. Results</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Run</th><th>Change</th><th>Dev bpb</th></tr>
+      <tr><td>Tied weights + GPT-2 init + AdamW/warmup/cosine/clip</td><td>batch=8</td><td><strong>2.2492</strong></td></tr>
+      <tr><td>+ RoPE, + batch=64</td><td>batch=64</td><td><strong>Couldn't complete due to lack of time</strong></td></tr>
+    </table>
+  </div>
+  <p>Full experiment log with hypothesis → change → before/after → conclusion for each run lives in <code>RUNLOG.md</code>. Final configuration rationale in ≤10 sentences lives in <code>NOTES.md</code>.</p>
+
+
+
+  <h2>3. How to reproduce</h2>
+  <pre>cd starter
+python train_bpe.py --data ../data/train_corpus.txt --vocab_size 768 --out bpe_merges.json
+python train.py --data ../data/train_corpus.txt --steps 2000 --out ckpt.pt
+python evaluate.py --checkpoint ckpt.pt --text_file ../data/dev_eval.txt</pre>
+
+</div>
+</body>
+</html>
